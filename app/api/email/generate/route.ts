@@ -1,44 +1,26 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { mailtmClient } from '@/lib/mailtm';
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
-    // Get available domains
     const domains = await mailtmClient.getDomains();
-
-
-    if (!domains || domains.length === 0) {
+    if (!domains?.length || !domains[0]?.domain) {
       return NextResponse.json(
-        { error: 'No email domains available' },
-        { status: 500 }
+        { error: 'No email domains available right now. Try again shortly.' },
+        { status: 503 }
       );
     }
 
-    // Use the first available domain
-    const domain = domains[0];
-    const randomString = Math.random().toString(36).substring(2, 10);
-    const email = `${randomString}@${domain.domain}`;
-    const password = Math.random().toString(36).substring(2, 15);
+    const domain = domains[0].domain as string;
+    const randomString = Math.random().toString(36).slice(2, 10);
+    const email = `${randomString}@${domain}`;
+    const password = Math.random().toString(36).slice(2, 15);
 
-    // Create account
     const account = await mailtmClient.createAccount(email, password);
-
-    return NextResponse.json({
-      success: true,
-      account: {
-        id: account.id,
-        address: account.address,
-        token: account.token,
-      },
-    });
+    return NextResponse.json(account);
   } catch (error) {
-    console.error('Generate email error:', error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : 'Failed to generate email',
-      },
-      { status: 500 }
-    );
+    const message =
+      error instanceof Error ? error.message : 'Failed to generate email';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

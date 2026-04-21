@@ -8,27 +8,16 @@ export async function DELETE(request: NextRequest) {
 
     if (!token || !messageId) {
       return NextResponse.json(
-        { error: 'Token and message ID are required' },
+        { error: 'Missing token or message id' },
         { status: 400 }
       );
     }
 
     await mailtmClient.deleteMessage(token, messageId);
-
-    return NextResponse.json({
-      success: true,
-      message: 'Message deleted',
-    });
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Delete message error:', error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Failed to delete message',
-      },
-      { status: 500 }
-    );
+    const message =
+      error instanceof Error ? error.message : 'Failed to delete message';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

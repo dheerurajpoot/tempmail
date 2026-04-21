@@ -26,14 +26,12 @@ export function InboxList() {
     setIsLoadingInbox(true);
     try {
       const response = await fetch(
-        `/api/email/inbox?token=${account.token}`
+        `/api/email/inbox?token=${encodeURIComponent(account.token)}`
       );
       const data = await response.json();
-
       if (!response.ok) {
         throw new Error(data.error || 'Failed to fetch inbox');
       }
-
       setMessages(data.messages || []);
     } catch (error) {
       setError(
@@ -50,14 +48,12 @@ export function InboxList() {
 
     try {
       const response = await fetch(
-        `/api/email/message?token=${account.token}&id=${messageId}`
+        `/api/email/message?token=${encodeURIComponent(account.token)}&id=${encodeURIComponent(messageId)}`
       );
       const data = await response.json();
-
       if (!response.ok) {
         throw new Error(data.error || 'Failed to read message');
       }
-
       setSelectedMessage(data.message);
     } catch (error) {
       setError(
@@ -72,15 +68,13 @@ export function InboxList() {
 
     try {
       const response = await fetch(
-        `/api/email/delete?token=${account.token}&id=${messageId}`,
+        `/api/email/delete?token=${encodeURIComponent(account.token)}&id=${encodeURIComponent(messageId)}`,
         { method: 'DELETE' }
       );
-
+      const data = await response.json();
       if (!response.ok) {
-        const data = await response.json();
         throw new Error(data.error || 'Failed to delete message');
       }
-
       removeMessage(messageId);
     } catch (error) {
       setError(

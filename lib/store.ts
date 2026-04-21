@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { MailtmAccount, MailtmMessage, MailtmFullMessage } from './mailtm';
+import type { MailtmAccount, MailtmMessage, MailtmFullMessage } from './mailtm';
 
 export interface EmailSession {
   account: MailtmAccount | null;

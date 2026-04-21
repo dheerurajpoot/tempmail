@@ -19,18 +19,16 @@ export function EmailGenerator() {
       const response = await fetch('/api/email/generate', {
         method: 'POST',
       });
-
       const data = await response.json();
-
       if (!response.ok) {
         throw new Error(data.error || 'Failed to generate email');
       }
 
       setAccount({
-        id: data.account.id,
-        address: data.account.address,
-        password: '', // Don't store password
-        token: data.account.token,
+        id: data.id,
+        address: data.address,
+        password: data.password,
+        token: data.token,
       });
 
       setMessages([]);

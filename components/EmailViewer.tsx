@@ -3,7 +3,7 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useEmailStore } from '@/lib/store';
-import { X, Copy, Download } from 'lucide-react';
+import { X, Copy } from 'lucide-react';
 import DOMPurify from 'isomorphic-dompurify';
 
 export function EmailViewer() {

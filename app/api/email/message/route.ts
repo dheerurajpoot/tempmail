@@ -8,27 +8,20 @@ export async function GET(request: NextRequest) {
 
     if (!token || !messageId) {
       return NextResponse.json(
-        { error: 'Token and message ID are required' },
+        { error: 'Missing token or message id' },
         { status: 400 }
       );
     }
 
     const message = await mailtmClient.getMessage(token, messageId);
+    if (!message.isRead) {
+      await mailtmClient.markAsRead(token, messageId);
+    }
 
-    return NextResponse.json({
-      success: true,
-      message,
-    });
+    return NextResponse.json({ message });
   } catch (error) {
-    console.error('Fetch message error:', error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Failed to fetch message',
-      },
-      { status: 500 }
-    );
+    const message =
+      error instanceof Error ? error.message : 'Failed to read message';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
