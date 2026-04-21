@@ -1,4 +1,7 @@
 const MAILTM_API = 'https://api.mail.tm';
+const REQUEST_TIMEOUT_MS = 10000;
+const MAX_RETRIES = 2;
+const DOMAIN_CACHE_TTL_MS = 10 * 60 * 1000;
 
 export interface MailtmAccount {
   id: string;
@@ -25,77 +28,111 @@ export interface MailtmFullMessage extends MailtmMessage {
   html: string[];
 }
 
-// Fallback domains for when the Mail.tm API returns 500 in production/Vercel
-const FALLBACK_DOMAINS = [
-  { domain: 'deltajohnsons.com', id: '69d3bd9d6ebaa58a0b42fdf9' }
-];
+interface MailtmDomain {
+  id: string;
+  domain: string;
+  isActive?: boolean;
+  isPrivate?: boolean;
+}
 
-// In-memory cache for domains to avoid rate-limiting/500 errors in production
-let cachedDomains: any[] = FALLBACK_DOMAINS;
-let lastFetchTime = 0;
-const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+let cachedDomains: MailtmDomain[] = [];
+let lastDomainFetchAt = 0;
 
 class MailtmClient {
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   /**
    * Universal request wrapper for Mail.tm API
    */
   private async request(path: string, options: RequestInit = {}) {
     const url = `${MAILTM_API}${path}`;
-    
-    const response = await fetch(url, {
-      ...options,
-      cache: 'no-store',
-      headers: {
-        'Accept': 'application/ld+json, application/json',
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
 
-    if (!response.ok) {
-      const text = await response.text();
-      let errorData;
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
       try {
-        errorData = JSON.parse(text);
-      } catch {
-        errorData = { message: text };
+        const response = await this.fetchWithTimeout(url, {
+          ...options,
+          cache: 'no-store',
+          headers: {
+            Accept: 'application/ld+json, application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'TempMailNextApp/1.0 (+https://deelzomail.vercel.app)',
+            ...options.headers,
+          },
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          let errorData;
+          try {
+            errorData = JSON.parse(text);
+          } catch {
+            errorData = { message: text };
+          }
+
+          const errorMessage =
+            errorData.message ||
+            errorData.error ||
+            `Request failed with status ${response.status}`;
+          const error = new Error(errorMessage);
+          (error as Error & { status?: number }).status = response.status;
+
+          // Retry only transient upstream failures
+          if (response.status >= 500 && attempt < MAX_RETRIES) {
+            lastError = error;
+            continue;
+          }
+
+          throw error;
+        }
+
+        if (response.status === 204) return null;
+        return response.json();
+      } catch (error) {
+        lastError = error;
+        if (attempt >= MAX_RETRIES) {
+          break;
+        }
       }
-      
-      const errorMessage = errorData.message || errorData.error || `Request failed with status ${response.status}`;
-      const error = new Error(errorMessage);
-      (error as any).status = response.status;
-      throw error;
     }
 
-    if (response.status === 204) return null;
-    return response.json();
+    throw lastError instanceof Error ? lastError : new Error('Mail.tm request failed');
   }
 
   /**
    * Fetch available email domains with fallback logic
    */
-  async getDomains(): Promise<any[]> {
+  async getDomains(): Promise<MailtmDomain[]> {
     const now = Date.now();
-    
-    // Check if cache is still fresh
-    if (cachedDomains.length > 0 && (now - lastFetchTime) < CACHE_DURATION) {
+
+    if (cachedDomains.length > 0 && now - lastDomainFetchAt < DOMAIN_CACHE_TTL_MS) {
       return cachedDomains;
     }
 
-    try {
-      const data = await this.request('/domains');
-      const domains = data['hydra:member'] || data['member'] || [];
-      
-      if (domains.length > 0) {
-        cachedDomains = domains;
-        lastFetchTime = now;
-      }
-      
-      return cachedDomains;
-    } catch (error) {
-      // If API fails in production, silently use fallbacks to prevent user-facing errors
-      return cachedDomains.length > 0 ? cachedDomains : FALLBACK_DOMAINS;
+    const data = await this.request('/domains');
+    const domains = (data['hydra:member'] || data['member'] || []) as MailtmDomain[];
+    const activeDomains = domains.filter((domain) => domain.domain && domain.isActive !== false);
+
+    if (activeDomains.length === 0) {
+      throw new Error('No active email domains are currently available');
     }
+
+    cachedDomains = activeDomains;
+    lastDomainFetchAt = now;
+    return activeDomains;
   }
 
   /**
