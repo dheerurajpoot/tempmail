@@ -6,6 +6,7 @@ export async function POST(request: NextRequest) {
     // Get available domains
     const domains = await mailtmClient.getDomains();
 
+
     if (!domains || domains.length === 0) {
       return NextResponse.json(
         { error: 'No email domains available' },

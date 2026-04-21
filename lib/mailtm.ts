@@ -31,7 +31,7 @@ class MailtmClient {
   async getDomains() {
     try {
       const response = await axios.get(`${MAILTM_API}/domains`);
-      return response.data.hydra_member || [];
+      return response.data['hydra:member'] || [];
     } catch (error) {
       console.error('Error fetching domains:', error);
       throw error;
@@ -69,7 +69,7 @@ class MailtmClient {
           Authorization: `Bearer ${token}`,
         },
       });
-      return response.data.hydra_member || [];
+      return response.data['hydra:member'] || [];
     } catch (error) {
       console.error('Error fetching messages:', error);
       throw error;
