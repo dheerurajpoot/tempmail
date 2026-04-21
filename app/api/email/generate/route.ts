@@ -30,8 +30,18 @@ export async function POST() {
     throw lastError ?? new Error('Failed to create account on available domains');
   } catch (error) {
     const err = error as Error & { status?: number };
-    const status = typeof err?.status === 'number' && err.status >= 400 ? err.status : 503;
-    const message = err?.message || 'Failed to generate email';
+    const upstreamStatus = typeof err?.status === 'number' ? err.status : undefined;
+    const status =
+      upstreamStatus === 429 || (upstreamStatus !== undefined && upstreamStatus >= 500)
+        ? 503
+        : upstreamStatus && upstreamStatus >= 400
+          ? upstreamStatus
+          : 503;
+
+    const message =
+      status === 503
+        ? 'Temporary email provider is busy. Please try again in a few seconds.'
+        : err?.message || 'Failed to generate email';
     return NextResponse.json({ error: message }, { status });
   }
 }

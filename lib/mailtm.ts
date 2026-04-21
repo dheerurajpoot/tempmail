@@ -1,7 +1,8 @@
 const MAILTM_API = 'https://api.mail.tm';
 const REQUEST_TIMEOUT_MS = 10000;
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 4;
 const DOMAIN_CACHE_TTL_MS = 10 * 60 * 1000;
+const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 export interface MailtmAccount {
   id: string;
@@ -39,6 +40,16 @@ let cachedDomains: MailtmDomain[] = [];
 let lastDomainFetchAt = 0;
 
 class MailtmClient {
+  private async sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private getBackoffMs(attempt: number): number {
+    const baseDelay = 300;
+    const jitter = Math.floor(Math.random() * 150);
+    return baseDelay * 2 ** attempt + jitter;
+  }
+
   private async fetchWithTimeout(
     url: string,
     options: RequestInit
@@ -69,7 +80,6 @@ class MailtmClient {
           headers: {
             Accept: 'application/ld+json, application/json',
             'Content-Type': 'application/json',
-            'User-Agent': 'TempMailNextApp/1.0 (+https://deelzomail.vercel.app)',
             ...options.headers,
           },
         });
@@ -90,9 +100,9 @@ class MailtmClient {
           const error = new Error(errorMessage);
           (error as Error & { status?: number }).status = response.status;
 
-          // Retry only transient upstream failures
-          if (response.status >= 500 && attempt < MAX_RETRIES) {
+          if (RETRYABLE_STATUSES.has(response.status) && attempt < MAX_RETRIES) {
             lastError = error;
+            await this.sleep(this.getBackoffMs(attempt));
             continue;
           }
 
@@ -106,6 +116,7 @@ class MailtmClient {
         if (attempt >= MAX_RETRIES) {
           break;
         }
+        await this.sleep(this.getBackoffMs(attempt));
       }
     }
 
