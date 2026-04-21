@@ -1,14 +1,20 @@
 const MAILTM_API = 'https://api.mail.tm';
+const ONE_SEC_MAIL_API = 'https://www.1secmail.com/api/v1/';
 const REQUEST_TIMEOUT_MS = 10000;
 const MAX_RETRIES = 4;
 const DOMAIN_CACHE_TTL_MS = 10 * 60 * 1000;
 const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+export type EmailProvider = 'mailtm' | '1secmail';
+
 export interface MailtmAccount {
   id: string;
   address: string;
   password: string;
-  token: string;
+  token?: string;
+  provider: EmailProvider;
+  login?: string;
+  domain?: string;
 }
 
 export interface MailtmMessage {
@@ -34,6 +40,18 @@ interface MailtmDomain {
   domain: string;
   isActive?: boolean;
   isPrivate?: boolean;
+}
+
+interface OneSecMailMessageItem {
+  id: number;
+  from: string;
+  subject: string;
+  date: string;
+}
+
+interface OneSecMailMessageBody extends OneSecMailMessageItem {
+  textBody?: string;
+  htmlBody?: string;
 }
 
 let cachedDomains: MailtmDomain[] = [];
@@ -165,6 +183,7 @@ class MailtmClient {
       address: accountData.address,
       password,
       token: tokenData.token,
+      provider: 'mailtm',
     };
   }
 
@@ -201,3 +220,104 @@ class MailtmClient {
 }
 
 export const mailtmClient = new MailtmClient();
+
+class OneSecMailClient {
+  private async request(query: URLSearchParams) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(`${ONE_SEC_MAIL_API}?${query.toString()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`1secmail request failed with status ${response.status}`);
+      }
+
+      return await response.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private toMessage(item: OneSecMailMessageItem): MailtmMessage {
+    return {
+      id: String(item.id),
+      from: {
+        address: item.from || 'unknown@sender',
+        name: item.from || 'Unknown Sender',
+      },
+      subject: item.subject || '(No subject)',
+      intro: '',
+      createdAt: item.date ? new Date(item.date).toISOString() : new Date().toISOString(),
+      updatedAt: item.date ? new Date(item.date).toISOString() : new Date().toISOString(),
+      isRead: false,
+    };
+  }
+
+  async createAccount(): Promise<MailtmAccount> {
+    const data = (await this.request(
+      new URLSearchParams({ action: 'genRandomMailbox', count: '1' })
+    )) as string[];
+
+    const address = data?.[0];
+    if (!address || !address.includes('@')) {
+      throw new Error('Failed to generate email address from secondary provider');
+    }
+
+    const [login, domain] = address.split('@');
+    return {
+      id: `1secmail-${address}`,
+      address,
+      password: '',
+      provider: '1secmail',
+      login,
+      domain,
+    };
+  }
+
+  async getMessages(login: string, domain: string): Promise<MailtmMessage[]> {
+    const data = (await this.request(
+      new URLSearchParams({ action: 'getMessages', login, domain })
+    )) as OneSecMailMessageItem[];
+    return (data || []).map((item) => this.toMessage(item));
+  }
+
+  async getMessage(
+    login: string,
+    domain: string,
+    messageId: string
+  ): Promise<MailtmFullMessage> {
+    const data = (await this.request(
+      new URLSearchParams({
+        action: 'readMessage',
+        login,
+        domain,
+        id: messageId,
+      })
+    )) as OneSecMailMessageBody;
+
+    const mapped = this.toMessage(data);
+    const html = data.htmlBody ? [data.htmlBody] : [];
+    return {
+      ...mapped,
+      text: data.textBody || '',
+      html,
+    };
+  }
+
+  async deleteMessage(login: string, domain: string, messageId: string): Promise<void> {
+    await this.request(
+      new URLSearchParams({
+        action: 'deleteMessage',
+        login,
+        domain,
+        id: messageId,
+      })
+    );
+  }
+}
+
+export const oneSecMailClient = new OneSecMailClient();

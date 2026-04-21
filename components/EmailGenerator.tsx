@@ -29,6 +29,9 @@ export function EmailGenerator() {
         address: data.address,
         password: data.password,
         token: data.token,
+        provider: data.provider || 'mailtm',
+        login: data.login,
+        domain: data.domain,
       });
 
       setMessages([]);

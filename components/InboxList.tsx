@@ -20,14 +20,31 @@ export function InboxList() {
     setError,
   } = useEmailStore();
 
+  const getBaseParams = () => {
+    if (!account) return null;
+    const params = new URLSearchParams({
+      provider: account.provider || 'mailtm',
+    });
+
+    if (account.provider === '1secmail') {
+      if (!account.login || !account.domain) return null;
+      params.set('login', account.login);
+      params.set('domain', account.domain);
+    } else {
+      if (!account.token) return null;
+      params.set('token', account.token);
+    }
+
+    return params;
+  };
+
   const fetchInbox = async () => {
-    if (!account?.token) return;
+    const params = getBaseParams();
+    if (!params) return;
 
     setIsLoadingInbox(true);
     try {
-      const response = await fetch(
-        `/api/email/inbox?token=${encodeURIComponent(account.token)}`
-      );
+      const response = await fetch(`/api/email/inbox?${params.toString()}`);
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || 'Failed to fetch inbox');
@@ -44,12 +61,12 @@ export function InboxList() {
   };
 
   const handleReadMessage = async (messageId: string) => {
-    if (!account?.token) return;
+    const params = getBaseParams();
+    if (!params) return;
 
     try {
-      const response = await fetch(
-        `/api/email/message?token=${encodeURIComponent(account.token)}&id=${encodeURIComponent(messageId)}`
-      );
+      params.set('id', messageId);
+      const response = await fetch(`/api/email/message?${params.toString()}`);
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || 'Failed to read message');
@@ -64,13 +81,14 @@ export function InboxList() {
   };
 
   const handleDeleteMessage = async (messageId: string) => {
-    if (!account?.token) return;
+    const params = getBaseParams();
+    if (!params) return;
 
     try {
-      const response = await fetch(
-        `/api/email/delete?token=${encodeURIComponent(account.token)}&id=${encodeURIComponent(messageId)}`,
-        { method: 'DELETE' }
-      );
+      params.set('id', messageId);
+      const response = await fetch(`/api/email/delete?${params.toString()}`, {
+        method: 'DELETE',
+      });
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || 'Failed to delete message');
@@ -86,18 +104,18 @@ export function InboxList() {
 
   // Auto-refresh effect
   useEffect(() => {
-    if (!autoRefresh || !account?.token) return;
+    if (!autoRefresh || !account) return;
 
     const interval = setInterval(fetchInbox, refreshInterval);
     return () => clearInterval(interval);
-  }, [autoRefresh, account?.token, refreshInterval, setMessages, setError]);
+  }, [autoRefresh, account, refreshInterval, setMessages, setError]);
 
   // Initial fetch
   useEffect(() => {
-    if (account?.token) {
+    if (account) {
       fetchInbox();
     }
-  }, [account?.token]);
+  }, [account]);
 
   if (!account) {
     return (
