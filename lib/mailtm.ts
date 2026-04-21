@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 const MAILTM_API = 'https://api.mail.tm';
 
 export interface MailtmAccount {
@@ -28,33 +26,77 @@ export interface MailtmFullMessage extends MailtmMessage {
 }
 
 class MailtmClient {
-  async getDomains() {
-    try {
-      const response = await axios.get(`${MAILTM_API}/domains`);
-      return response.data['hydra:member'] || [];
-    } catch (error) {
-      console.error('Error fetching domains:', error);
+  private async request(path: string, options: RequestInit = {}) {
+    const url = `${MAILTM_API}${path}`;
+    const defaultHeaders = {
+      'Accept': 'application/ld+json, application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'TempMail/1.0 (Next.js Application)',
+    };
+
+    const config = {
+      ...options,
+      headers: {
+        ...defaultHeaders,
+        ...options.headers,
+      },
+    };
+
+    const response = await fetch(url, config);
+
+    if (!response.ok) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch {
+        errorData = { message: await response.text() };
+      }
+      
+      const error = new Error(errorData.message || `Request failed with status ${response.status}`);
+      (error as any).status = response.status;
+      (error as any).data = errorData;
       throw error;
     }
+
+    if (response.status === 204) return null;
+    return response.json();
   }
 
-  async createAccount(email: string, password: string) {
+  async getDomains(retries = 3, delay = 1000): Promise<any[]> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const data = await this.request('/domains');
+        console.log('--- Domain Fetch Debug ---');
+        console.log('API Response data:', JSON.stringify(data));
+        const domains = data['hydra:member'] || data['member'] || [];
+        console.log('Extracted domains:', domains);
+        return domains;
+      } catch (error) {
+        console.error(`Attempt ${i + 1} to fetch domains failed:`, error);
+        if (i === retries - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+      }
+    }
+    return [];
+  }
+
+  async createAccount(email: string, password: string): Promise<MailtmAccount> {
     try {
-      const response = await axios.post(`${MAILTM_API}/accounts`, {
-        address: email,
-        password,
+      const accountData = await this.request('/accounts', {
+        method: 'POST',
+        body: JSON.stringify({ address: email, password }),
       });
 
-      const loginResponse = await axios.post(`${MAILTM_API}/token`, {
-        address: email,
-        password,
+      const tokenData = await this.request('/token', {
+        method: 'POST',
+        body: JSON.stringify({ address: email, password }),
       });
 
       return {
-        id: response.data.id,
-        address: response.data.address,
+        id: accountData.id,
+        address: accountData.address,
         password,
-        token: loginResponse.data.token,
+        token: tokenData.token,
       };
     } catch (error) {
       console.error('Error creating account:', error);
@@ -62,37 +104,37 @@ class MailtmClient {
     }
   }
 
-  async getMessages(token: string) {
+  async getMessages(token: string): Promise<MailtmMessage[]> {
     try {
-      const response = await axios.get(`${MAILTM_API}/messages`, {
+      const data = await this.request('/messages', {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
-      return response.data['hydra:member'] || [];
+      return data['hydra:member'] || [];
     } catch (error) {
       console.error('Error fetching messages:', error);
       throw error;
     }
   }
 
-  async getMessage(token: string, messageId: string) {
+  async getMessage(token: string, messageId: string): Promise<MailtmFullMessage> {
     try {
-      const response = await axios.get(`${MAILTM_API}/messages/${messageId}`, {
+      return await this.request(`/messages/${messageId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
-      return response.data;
     } catch (error) {
       console.error('Error fetching message:', error);
       throw error;
     }
   }
 
-  async deleteMessage(token: string, messageId: string) {
+  async deleteMessage(token: string, messageId: string): Promise<void> {
     try {
-      await axios.delete(`${MAILTM_API}/messages/${messageId}`, {
+      await this.request(`/messages/${messageId}`, {
+        method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -103,17 +145,16 @@ class MailtmClient {
     }
   }
 
-  async markAsRead(token: string, messageId: string) {
+  async markAsRead(token: string, messageId: string): Promise<void> {
     try {
-      await axios.patch(
-        `${MAILTM_API}/messages/${messageId}`,
-        { isRead: true },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      await this.request(`/messages/${messageId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/merge-patch+json',
+        },
+        body: JSON.stringify({ isRead: true }),
+      });
     } catch (error) {
       console.error('Error marking message as read:', error);
       throw error;

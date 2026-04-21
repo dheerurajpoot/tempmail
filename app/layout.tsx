@@ -9,7 +9,6 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: 'Temporary Email Generator - Disposable Email Addresses',
   description: 'Create instant temporary email addresses for sign-ups, testing, and privacy protection. Free, anonymous, and no registration required.',
-  generator: 'v0.app',
   icons: {
     icon: [
       {
@@ -35,8 +34,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="bg-white">
-      <body className="font-sans antialiased bg-white">
+    <html lang="en" className="bg-white" suppressHydrationWarning>
+      <body className="font-sans antialiased bg-white" suppressHydrationWarning>
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
