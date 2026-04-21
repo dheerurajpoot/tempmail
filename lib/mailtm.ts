@@ -32,10 +32,13 @@ class MailtmClient {
       'Accept': 'application/ld+json, application/json',
       'Content-Type': 'application/json',
       'User-Agent': 'TempMail/1.0 (Next.js Application)',
+      'Referer': 'https://mail.tm/',
+      'Origin': 'https://mail.tm',
     };
 
-    const config = {
+    const config: RequestInit = {
       ...options,
+      cache: 'no-store',
       headers: {
         ...defaultHeaders,
         ...options.headers,
@@ -53,6 +56,7 @@ class MailtmClient {
         errorData = { message: text };
       }
       
+      console.error(`API Error Response (${response.status}):`, JSON.stringify(errorData));
       const error = new Error(errorData.message || errorData.error || `Request failed with status ${response.status}`);
       (error as any).status = response.status;
       (error as any).data = errorData;
