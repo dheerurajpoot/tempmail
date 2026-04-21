@@ -303,6 +303,9 @@ class GuerrillaMailClient {
     )) as GuerrillaMailMessageItem;
 
     const mapped = this.toMessage(data);
+    const body = data.mail_body || '';
+    const hasHtmlTags = /<[a-z][\s\S]*>/i.test(body);
+
     return {
       ...mapped,
       text: data.mail_body || '',
