@@ -25,8 +25,13 @@ export interface MailtmFullMessage extends MailtmMessage {
   html: string[];
 }
 
+// Fallback domains for when the Mail.tm API returns 500 in production/Vercel
+const FALLBACK_DOMAINS = [
+  { domain: 'deltajohnsons.com', id: '69d3bd9d6ebaa58a0b42fdf9' }
+];
+
 // In-memory cache for domains to avoid rate-limiting/500 errors in production
-let cachedDomains: any[] = [];
+let cachedDomains: any[] = FALLBACK_DOMAINS;
 let lastFetchTime = 0;
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
@@ -67,12 +72,12 @@ class MailtmClient {
   }
 
   /**
-   * Fetch available email domains with caching logic
+   * Fetch available email domains with fallback logic
    */
   async getDomains(): Promise<any[]> {
     const now = Date.now();
     
-    // Return cached domains if valid
+    // Check if cache is still fresh
     if (cachedDomains.length > 0 && (now - lastFetchTime) < CACHE_DURATION) {
       return cachedDomains;
     }
@@ -86,13 +91,10 @@ class MailtmClient {
         lastFetchTime = now;
       }
       
-      return domains;
+      return cachedDomains;
     } catch (error) {
-      // If API fails but we have old cache, use it as fallback
-      if (cachedDomains.length > 0) {
-        return cachedDomains;
-      }
-      throw error;
+      // If API fails in production, silently use fallbacks to prevent user-facing errors
+      return cachedDomains.length > 0 ? cachedDomains : FALLBACK_DOMAINS;
     }
   }
 
