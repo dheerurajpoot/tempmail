@@ -25,27 +25,27 @@ export interface MailtmFullMessage extends MailtmMessage {
   html: string[];
 }
 
+// In-memory cache for domains to avoid rate-limiting/500 errors in production
+let cachedDomains: any[] = [];
+let lastFetchTime = 0;
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
 class MailtmClient {
+  /**
+   * Universal request wrapper for Mail.tm API
+   */
   private async request(path: string, options: RequestInit = {}) {
     const url = `${MAILTM_API}${path}`;
-    const defaultHeaders = {
-      'Accept': 'application/ld+json, application/json',
-      'Content-Type': 'application/json',
-      'User-Agent': 'TempMail/1.0 (Next.js Application)',
-      'Referer': 'https://mail.tm/',
-      'Origin': 'https://mail.tm',
-    };
-
-    const config: RequestInit = {
+    
+    const response = await fetch(url, {
       ...options,
       cache: 'no-store',
       headers: {
-        ...defaultHeaders,
+        'Accept': 'application/ld+json, application/json',
+        'Content-Type': 'application/json',
         ...options.headers,
       },
-    };
-
-    const response = await fetch(url, config);
+    });
 
     if (!response.ok) {
       const text = await response.text();
@@ -56,10 +56,9 @@ class MailtmClient {
         errorData = { message: text };
       }
       
-      console.error(`API Error Response (${response.status}):`, JSON.stringify(errorData));
-      const error = new Error(errorData.message || errorData.error || `Request failed with status ${response.status}`);
+      const errorMessage = errorData.message || errorData.error || `Request failed with status ${response.status}`;
+      const error = new Error(errorMessage);
       (error as any).status = response.status;
-      (error as any).data = errorData;
       throw error;
     }
 
@@ -67,103 +66,87 @@ class MailtmClient {
     return response.json();
   }
 
-  async getDomains(retries = 3, delay = 1000): Promise<any[]> {
-    for (let i = 0; i < retries; i++) {
-      try {
-        const data = await this.request('/domains');
-        console.log('--- Domain Fetch Debug ---');
-        console.log('API Response data:', JSON.stringify(data));
-        const domains = data['hydra:member'] || data['member'] || [];
-        console.log('Extracted domains:', domains);
-        return domains;
-      } catch (error) {
-        console.error(`Attempt ${i + 1} to fetch domains failed:`, error);
-        if (i === retries - 1) throw error;
-        await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
-      }
+  /**
+   * Fetch available email domains with caching logic
+   */
+  async getDomains(): Promise<any[]> {
+    const now = Date.now();
+    
+    // Return cached domains if valid
+    if (cachedDomains.length > 0 && (now - lastFetchTime) < CACHE_DURATION) {
+      return cachedDomains;
     }
-    return [];
-  }
 
-  async createAccount(email: string, password: string): Promise<MailtmAccount> {
     try {
-      const accountData = await this.request('/accounts', {
-        method: 'POST',
-        body: JSON.stringify({ address: email, password }),
-      });
-
-      const tokenData = await this.request('/token', {
-        method: 'POST',
-        body: JSON.stringify({ address: email, password }),
-      });
-
-      return {
-        id: accountData.id,
-        address: accountData.address,
-        password,
-        token: tokenData.token,
-      };
+      const data = await this.request('/domains');
+      const domains = data['hydra:member'] || data['member'] || [];
+      
+      if (domains.length > 0) {
+        cachedDomains = domains;
+        lastFetchTime = now;
+      }
+      
+      return domains;
     } catch (error) {
-      console.error('Error creating account:', error);
+      // If API fails but we have old cache, use it as fallback
+      if (cachedDomains.length > 0) {
+        return cachedDomains;
+      }
       throw error;
     }
+  }
+
+  /**
+   * Create a new temporary email account
+   */
+  async createAccount(email: string, password: string): Promise<MailtmAccount> {
+    const accountData = await this.request('/accounts', {
+      method: 'POST',
+      body: JSON.stringify({ address: email, password }),
+    });
+
+    const tokenData = await this.request('/token', {
+      method: 'POST',
+      body: JSON.stringify({ address: email, password }),
+    });
+
+    return {
+      id: accountData.id,
+      address: accountData.address,
+      password,
+      token: tokenData.token,
+    };
   }
 
   async getMessages(token: string): Promise<MailtmMessage[]> {
-    try {
-      const data = await this.request('/messages', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      return data['hydra:member'] || [];
-    } catch (error) {
-      console.error('Error fetching messages:', error);
-      throw error;
-    }
+    const data = await this.request('/messages', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return data['hydra:member'] || data['member'] || [];
   }
 
   async getMessage(token: string, messageId: string): Promise<MailtmFullMessage> {
-    try {
-      return await this.request(`/messages/${messageId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-    } catch (error) {
-      console.error('Error fetching message:', error);
-      throw error;
-    }
+    return await this.request(`/messages/${messageId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
   }
 
   async deleteMessage(token: string, messageId: string): Promise<void> {
-    try {
-      await this.request(`/messages/${messageId}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-    } catch (error) {
-      console.error('Error deleting message:', error);
-      throw error;
-    }
+    await this.request(`/messages/${messageId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
   }
 
   async markAsRead(token: string, messageId: string): Promise<void> {
-    try {
-      await this.request(`/messages/${messageId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/merge-patch+json',
-        },
-        body: JSON.stringify({ isRead: true }),
-      });
-    } catch (error) {
-      console.error('Error marking message as read:', error);
-      throw error;
-    }
+    await this.request(`/messages/${messageId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/merge-patch+json',
+      },
+      body: JSON.stringify({ isRead: true }),
+    });
   }
 }
 
