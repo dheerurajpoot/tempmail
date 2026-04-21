@@ -308,8 +308,8 @@ class GuerrillaMailClient {
 
     return {
       ...mapped,
-      text: data.mail_body || '',
-      html: [],
+      text: hasHtmlTags ? body.replace(/<[^>]+>/g, ' ') : body,
+      html: hasHtmlTags ? [body] : [],
     };
   }
 
