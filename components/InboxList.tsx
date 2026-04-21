@@ -26,13 +26,11 @@ export function InboxList() {
       provider: account.provider || 'mailtm',
     });
 
-    if (account.provider === '1secmail') {
-      if (!account.login || !account.domain) return null;
-      params.set('login', account.login);
-      params.set('domain', account.domain);
-    } else {
-      if (!account.token) return null;
-      params.set('token', account.token);
+    if (!account.token) return null;
+    params.set('token', account.token);
+
+    if (account.provider === 'guerrillamail') {
+      return params;
     }
 
     return params;

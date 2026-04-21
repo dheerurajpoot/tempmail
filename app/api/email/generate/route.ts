@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { mailtmClient, oneSecMailClient } from '@/lib/mailtm';
+import { guerrillaMailClient, mailtmClient } from '@/lib/mailtm';
 
 export async function POST() {
   let mailtmError: Error | null = null;
@@ -35,7 +35,7 @@ export async function POST() {
   }
 
   try {
-    const fallbackAccount = await oneSecMailClient.createAccount();
+    const fallbackAccount = await guerrillaMailClient.createAccount();
     return NextResponse.json(fallbackAccount);
   } catch (error) {
     const fallbackError =

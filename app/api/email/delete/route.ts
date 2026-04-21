@@ -1,27 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mailtmClient, oneSecMailClient } from '@/lib/mailtm';
+import { guerrillaMailClient, mailtmClient } from '@/lib/mailtm';
 
 export async function DELETE(request: NextRequest) {
   try {
     const provider = request.nextUrl.searchParams.get('provider') || 'mailtm';
     const token = request.nextUrl.searchParams.get('token');
     const messageId = request.nextUrl.searchParams.get('id');
-    const login = request.nextUrl.searchParams.get('login');
-    const domain = request.nextUrl.searchParams.get('domain');
 
     if (!messageId) {
       return NextResponse.json({ error: 'Missing message id' }, { status: 400 });
     }
 
-    if (provider === '1secmail') {
-      if (!login || !domain) {
+    if (provider === 'guerrillamail') {
+      if (!token) {
         return NextResponse.json(
-          { error: 'Missing login or domain for secondary provider' },
+          { error: 'Missing token for secondary provider' },
           { status: 400 }
         );
       }
 
-      await oneSecMailClient.deleteMessage(login, domain, messageId);
+      await guerrillaMailClient.deleteMessage(token, messageId);
       return NextResponse.json({ success: true });
     }
 

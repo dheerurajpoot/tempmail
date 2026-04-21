@@ -1,11 +1,11 @@
 const MAILTM_API = 'https://api.mail.tm';
-const ONE_SEC_MAIL_API = 'https://www.1secmail.com/api/v1/';
+const GUERRILLA_MAIL_API = 'https://api.guerrillamail.com/ajax.php';
 const REQUEST_TIMEOUT_MS = 10000;
 const MAX_RETRIES = 4;
 const DOMAIN_CACHE_TTL_MS = 10 * 60 * 1000;
 const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-export type EmailProvider = 'mailtm' | '1secmail';
+export type EmailProvider = 'mailtm' | 'guerrillamail';
 
 export interface MailtmAccount {
   id: string;
@@ -42,16 +42,15 @@ interface MailtmDomain {
   isPrivate?: boolean;
 }
 
-interface OneSecMailMessageItem {
-  id: number;
-  from: string;
-  subject: string;
-  date: string;
-}
-
-interface OneSecMailMessageBody extends OneSecMailMessageItem {
-  textBody?: string;
-  htmlBody?: string;
+interface GuerrillaMailMessageItem {
+  mail_id: number;
+  mail_from: string;
+  mail_subject: string;
+  mail_excerpt: string;
+  mail_date: string;
+  mail_timestamp: number;
+  mail_read: number;
+  mail_body?: string;
 }
 
 let cachedDomains: MailtmDomain[] = [];
@@ -221,19 +220,23 @@ class MailtmClient {
 
 export const mailtmClient = new MailtmClient();
 
-class OneSecMailClient {
-  private async request(query: URLSearchParams) {
+interface GuerrillaMailListResponse {
+  list?: GuerrillaMailMessageItem[];
+}
+
+class GuerrillaMailClient {
+  private async request(params: URLSearchParams) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
-      const response = await fetch(`${ONE_SEC_MAIL_API}?${query.toString()}`, {
+      const response = await fetch(`${GUERRILLA_MAIL_API}?${params.toString()}`, {
         cache: 'no-store',
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        throw new Error(`1secmail request failed with status ${response.status}`);
+        throw new Error(`Guerrilla Mail request failed with status ${response.status}`);
       }
 
       return await response.json();
@@ -242,82 +245,80 @@ class OneSecMailClient {
     }
   }
 
-  private toMessage(item: OneSecMailMessageItem): MailtmMessage {
+  private toMessage(item: GuerrillaMailMessageItem): MailtmMessage {
+    const date =
+      item.mail_timestamp && item.mail_timestamp > 0
+        ? new Date(item.mail_timestamp * 1000).toISOString()
+        : new Date().toISOString();
+
     return {
-      id: String(item.id),
+      id: String(item.mail_id),
       from: {
-        address: item.from || 'unknown@sender',
-        name: item.from || 'Unknown Sender',
+        address: item.mail_from || 'unknown@sender',
+        name: item.mail_from || 'Unknown Sender',
       },
-      subject: item.subject || '(No subject)',
-      intro: '',
-      createdAt: item.date ? new Date(item.date).toISOString() : new Date().toISOString(),
-      updatedAt: item.date ? new Date(item.date).toISOString() : new Date().toISOString(),
-      isRead: false,
+      subject: item.mail_subject || '(No subject)',
+      intro: item.mail_excerpt || '',
+      createdAt: date,
+      updatedAt: date,
+      isRead: item.mail_read === 1,
     };
   }
 
   async createAccount(): Promise<MailtmAccount> {
     const data = (await this.request(
-      new URLSearchParams({ action: 'genRandomMailbox', count: '1' })
-    )) as string[];
+      new URLSearchParams({ f: 'get_email_address' })
+    )) as { email_addr?: string; sid_token?: string };
 
-    const address = data?.[0];
-    if (!address || !address.includes('@')) {
+    const address = data?.email_addr;
+    const sidToken = data?.sid_token;
+    if (!address || !address.includes('@') || !sidToken) {
       throw new Error('Failed to generate email address from secondary provider');
     }
 
-    const [login, domain] = address.split('@');
     return {
-      id: `1secmail-${address}`,
+      id: `guerrillamail-${address}`,
       address,
       password: '',
-      provider: '1secmail',
-      login,
-      domain,
+      token: sidToken,
+      provider: 'guerrillamail',
     };
   }
 
-  async getMessages(login: string, domain: string): Promise<MailtmMessage[]> {
+  async getMessages(token: string): Promise<MailtmMessage[]> {
     const data = (await this.request(
-      new URLSearchParams({ action: 'getMessages', login, domain })
-    )) as OneSecMailMessageItem[];
-    return (data || []).map((item) => this.toMessage(item));
+      new URLSearchParams({ f: 'get_email_list', offset: '0', sid_token: token })
+    )) as GuerrillaMailListResponse;
+    const items = Array.isArray(data.list) ? data.list : [];
+    return items.map((item) => this.toMessage(item));
   }
 
-  async getMessage(
-    login: string,
-    domain: string,
-    messageId: string
-  ): Promise<MailtmFullMessage> {
+  async getMessage(token: string, messageId: string): Promise<MailtmFullMessage> {
     const data = (await this.request(
       new URLSearchParams({
-        action: 'readMessage',
-        login,
-        domain,
-        id: messageId,
+        f: 'fetch_email',
+        sid_token: token,
+        email_id: messageId,
       })
-    )) as OneSecMailMessageBody;
+    )) as GuerrillaMailMessageItem;
 
     const mapped = this.toMessage(data);
-    const html = data.htmlBody ? [data.htmlBody] : [];
     return {
       ...mapped,
-      text: data.textBody || '',
-      html,
+      text: data.mail_body || '',
+      html: [],
     };
   }
 
-  async deleteMessage(login: string, domain: string, messageId: string): Promise<void> {
+  async deleteMessage(token: string, messageId: string): Promise<void> {
     await this.request(
       new URLSearchParams({
-        action: 'deleteMessage',
-        login,
-        domain,
-        id: messageId,
+        f: 'del_email',
+        sid_token: token,
+        'email_ids[]': messageId,
       })
     );
   }
 }
 
-export const oneSecMailClient = new OneSecMailClient();
+export const guerrillaMailClient = new GuerrillaMailClient();
