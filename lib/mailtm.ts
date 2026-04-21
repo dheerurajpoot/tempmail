@@ -45,14 +45,15 @@ class MailtmClient {
     const response = await fetch(url, config);
 
     if (!response.ok) {
+      const text = await response.text();
       let errorData;
       try {
-        errorData = await response.json();
+        errorData = JSON.parse(text);
       } catch {
-        errorData = { message: await response.text() };
+        errorData = { message: text };
       }
       
-      const error = new Error(errorData.message || `Request failed with status ${response.status}`);
+      const error = new Error(errorData.message || errorData.error || `Request failed with status ${response.status}`);
       (error as any).status = response.status;
       (error as any).data = errorData;
       throw error;
